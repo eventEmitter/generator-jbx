@@ -15,6 +15,6 @@
     "chalk": "^2.3.0",
     "ee-log": "^2.0.4",
     "semver": "^5.4.1",
-    "yeoman-generator": "^1.0.0"
+    "yeoman-generator": "^2.0.1"
   }
 }
