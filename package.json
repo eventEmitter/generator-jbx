@@ -1,0 +1,20 @@
+{
+  "name": "generator-jbx",
+  "version": "1.0.0",
+  "description": "joinbox.com tooling generators",
+  "files": [
+    "generators",
+    "discover",
+    "status",
+    "prepare-release"
+  ],
+  "keywords": [
+    "yeoman-generator"
+  ],
+  "dependencies": {
+    "chalk": "^2.3.0",
+    "ee-log": "^2.0.4",
+    "semver": "^5.4.1",
+    "yeoman-generator": "^1.0.0"
+  }
+}
