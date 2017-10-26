@@ -12,6 +12,7 @@
     const promisify = require('util').promisify;
     const mkdir = promisify(require('fs').mkdir);
     const writeFile = promisify(require('fs').writeFile);
+    const readFile = promisify(require('fs').readFile);
     const stat = promisify(require('fs').stat);
 
 
@@ -62,7 +63,7 @@
                     messages: messages,
                     destinationRoot: this.destinationRoot(),
                 });
-                //return;
+                return;
             }
 
 
@@ -80,6 +81,7 @@
 
                 await Promise.all(projects.map(async (projectName) => {
                     const projectRoot = path.join(this.destinationRoot(), '../', projectName);
+                    const packageJSONPath = path.join(projectRoot, 'package.json');
                     const git = new Git({path: projectRoot});
                     const semver = new SemanticVersion();
 
@@ -112,11 +114,11 @@
                         const tags = await git.getTags();
 
                         // get latest semver tag
-                        latestTag = semver.getLatestSemverFromTags(tags.map(tag => tag.name));
+                        latestTag = semver.getLatestSemverFromTags(tags);
                     }
 
                     // check if there are any updates since the last release
-                    const commits = await git.getCommits((latestBranch || latestTag), sourceBranch);
+                    const commits = await git.getCommits((latestBranch || (latestTag ? latestTag.name : null)), sourceBranch);
 
                     // get last commit, for its date
                     const lastCommit = await git.getMostRecentCommit();
@@ -128,10 +130,27 @@
                     const versions = semver.getVersionFromCommitLogs(commits);
 
                     const repository = await git.getOriginUrl();
+                    const repositoryMatch = /\.com[\:\/]([a-z0-9-_]+\/[a-z0-9-_]+)\b/gi.exec(repository);
+                    //const gitRepository = repositoryMatch ? repositoryMatch[1] : null;
+
+                    // get the package.json file
+                    let packageJson;
+                    try {
+                        const data = await readFile(packageJSONPath);
+                        packageJson = JSON.parse(data);
+                    } catch (e) {}
+
+
+                    const baseBranch = (commits.length ? (latestBranch || (latestTag ? latestTag.name : null) || 'master') : 'master');
+
                     const projectConfig = {
+                        name: projectName,
                         doRelease: doRelease,
-                        baseBranch: (commits.length ? (latestBranch || latestTag || 'master') : 'master'),
+                        baseBranch: baseBranch,
                         versionUpdates: versions,
+                        //gitRepository: gitRepository,
+                        dependencyRef: doRelease ? baseBranch : (latestBranchDate > (latestTag ? latestTag.date : null) ? latestBranch : latestTag.name),
+                        packageJson: packageJson,
                         changelog: semver.renderChangelog({
                             versions: versions,
                             releaseName: releaseName,
@@ -142,13 +161,12 @@
                         }),
                     };
 
-                    releaseCandidates.set(projectName, projectConfig);
-
+                    releaseCandidates.set(packageJson.name, projectConfig);
 
 
 
                     if (projectConfig.doRelease) {
-                        // get the branch
+                        // get the branch 
                         const hasBranch = await git.hasBranch(targetBranch);
                         if (!hasBranch) await git.createBranch(targetBranch);
                         else await git.checkout(targetBranch);
@@ -163,7 +181,7 @@
                         }
                         
 
-                        // store changelog
+                        // store change log
                         await writeFile(path.join(changelogDir, `changelog-${targetBranch}.md`), projectConfig.changelog);
 
                         const changelogFile = path.join('changelogs', `changelog-${targetBranch}.md`);
@@ -185,15 +203,46 @@
                             await git.commit(changelogFile, `chore(changelog): add changelog for ${releaseName} release`);
                         }
                     }
-
-
-
-
-                    
                 }));
+                
 
 
-                //log(releaseCandidates);
+
+
+                // create dependency tree
+                Array.from(releaseCandidates.values()).forEach((project) => {
+                    if (project.packageJson.dependencies) {
+                        project.dependencies = Object.keys(project.packageJson.dependencies)
+                            .filter(name => !!name)
+                            .filter(name => releaseCandidates.has(name));
+                    }
+
+                    if (project.packageJson.devDependencies) {
+                        project.devDependencies = Object.keys(project.packageJson.devDependencies)
+                            .filter(name => !!name)
+                            .filter(name => releaseCandidates.has(name));
+                    }
+
+                    if (project.packageJson.optionalDependencies) {
+                        project.optionalDependencies = Object.keys(project.packageJson.optionalDependencies)
+                            .filter(name => !!name)
+                            .filter(name => releaseCandidates.has(name));
+                    }
+                });
+
+    
+
+    
+
+
+                // push 
+                await Promise.all(Array.from(releaseCandidates.values()).map(async (project) => {
+                    if (project.doRelease) {
+                        const projectRoot = path.join(this.destinationRoot(), '../', project.name);
+                        const git = new Git({path: projectRoot});
+                        await git.push(targetBranch);
+                    }
+                }));
             }
         }
     }
